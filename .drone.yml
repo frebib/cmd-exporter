@@ -1,0 +1,58 @@
+---
+kind: pipeline
+type: docker
+name: default
+
+steps:
+- name: go tests
+  image: golang:alpine
+  commands:
+  - go build -o cmd-exporter
+
+  - go get -u golang.org/x/tools/cmd/goimports golang.org/x/lint/golint
+  - test -z "$(gofmt -l . | tee /dev/stderr)"
+  - test -z "$(goimports -local -e -d . | tee /dev/stderr)"
+  - golint ./...
+
+- name: docker build
+  pull: always
+  image: spritsail/docker-build
+
+- name: docker publish
+  pull: always
+  image: spritsail/docker-publish
+  settings:
+    repo: frebib/cmd-exporter
+    tags:
+    - latest
+    - '%label org.label-schema.version'
+    login: {from_secret: docker_login}
+  when:
+    branch:
+    - master
+    event:
+    - push
+
+---
+kind: pipeline
+name: update-readme
+
+steps:
+- name: dockerhub-readme
+  pull: always
+  image: jlesage/drone-push-readme
+  settings:
+    username: {from_secret: docker_username}
+    password: {from_secret: docker_password}
+    repo: frebib/cmd-exporter
+  when:
+    branch:
+    - master
+    event:
+    - push
+
+---
+kind: signature
+hmac: 934099a4a8192763ffe0133d5513c7f511b6e5695acf44dee123e12c805d8d71
+
+...
