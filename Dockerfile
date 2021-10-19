@@ -14,7 +14,7 @@ RUN go build -v -ldflags "-w -s -X main.Version=$VERSION"
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-FROM spritsail/alpine:3.13
+FROM spritsail/alpine:3.14
 
 ARG VERSION
 
