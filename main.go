@@ -13,6 +13,8 @@ import (
 
 	kitlog "github.com/go-kit/log"
 	"github.com/jessevdk/go-flags"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/exporter-toolkit/web"
 )
@@ -50,7 +52,7 @@ func main() {
 		}
 	}
 
-	gather := CommandGatherer{
+	commands := CommandGatherer{
 		config: &config,
 	}
 
@@ -105,9 +107,15 @@ func main() {
 		}
 	}
 
+	registry := prometheus.NewPedanticRegistry()
+	registry.MustRegister(collectors.NewBuildInfoCollector())
+	registry.MustRegister(collectors.NewGoCollector())
+	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	gatherers := prometheus.Gatherers{commands, registry}
+
 	router := http.NewServeMux()
 	router.Handle("/metrics", promhttp.Handler())
-	router.Handle(opts.MetricsPath, promhttp.HandlerFor(gather, promhttp.HandlerOpts{}))
+	router.Handle(opts.MetricsPath, promhttp.HandlerFor(gatherers, promhttp.HandlerOpts{}))
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`<html>
 		<head><title>Command Exporter</title></head>

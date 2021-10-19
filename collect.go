@@ -12,6 +12,7 @@ import (
 )
 
 var (
+	// Namespace is the metric namespace
 	Namespace = "command"
 
 	commandSuccess = prometheus.NewDesc(
@@ -89,9 +90,8 @@ func (ce *cmdExecutor) Meta(ch chan<- prometheus.Metric) {
 func ofBool(b bool) float64 {
 	if b {
 		return 1
-	} else {
-		return 0
 	}
+	return 0
 }
 
 type cmdCollector struct {
@@ -116,12 +116,14 @@ type CommandGatherer struct {
 	config *Config
 }
 
+// Gather calls the Collect method of the registered Collectors
 func (c CommandGatherer) Gather() ([]*dto.MetricFamily, error) {
 	var executors []*cmdExecutor
-	registry := prometheus.NewRegistry()
+	var wg sync.WaitGroup
+
+	registry := prometheus.NewPedanticRegistry()
 	gatherers := prometheus.Gatherers{registry}
 
-	var wg sync.WaitGroup
 	for i := range c.config.Scripts {
 		wg.Add(1)
 
