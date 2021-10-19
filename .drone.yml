@@ -9,7 +9,8 @@ steps:
   commands:
   - go build -o cmd-exporter
 
-  - go get -u golang.org/x/tools/cmd/goimports golang.org/x/lint/golint
+  - go install golang.org/x/tools/cmd/goimports@latest
+  - go install golang.org/x/lint/golint@latest
   - test -z "$(gofmt -l . | tee /dev/stderr)"
   - test -z "$(goimports -local -e -d . | tee /dev/stderr)"
   - golint ./...
