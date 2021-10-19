@@ -11,14 +11,17 @@ import (
 	"os/exec"
 	"path"
 
+	kitlog "github.com/go-kit/log"
 	"github.com/jessevdk/go-flags"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/exporter-toolkit/web"
 )
 
 var opts struct {
-	ListenAddr  string `short:"l" long:"listen" default:":9654" description:"http listen address to serve metrics"`
-	MetricsPath string `short:"p" long:"metrics-path" default:"/command" description:"http path at which to serve metrics"`
-	ConfigFile  string `short:"c" long:"config-file" default:"./config.yml" description:"path to config yaml file"`
+	ListenAddr    string `short:"l" long:"listen" default:":9654" description:"http listen address to serve metrics"`
+	MetricsPath   string `short:"p" long:"metrics-path" default:"/command" description:"http path at which to serve metrics"`
+	ConfigFile    string `short:"c" long:"config-file" default:"./config.yml" description:"path to config yaml file"`
+	WebConfigFile string `short:"w" long:"web-config-file" required:"false" description:"path to web-config file"`
 }
 
 func main() {
@@ -29,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 	if len(pos) > 0 {
-		fmt.Fprintln(os.Stderr, "positional arguments are not supported\n")
+		fmt.Fprint(os.Stderr, "positional arguments are not supported\n\n")
 		parser.WriteHelp(os.Stderr)
 		os.Exit(1)
 	}
@@ -122,6 +125,7 @@ func main() {
 		Handler: router,
 	}
 
+	logger := kitlog.NewLogfmtLogger(log.Writer())
 	log.Printf("Listening on %s at %s\n", opts.ListenAddr, opts.MetricsPath)
-	log.Fatalln(server.ListenAndServe())
+	log.Fatalln(web.ListenAndServe(server, opts.WebConfigFile, logger))
 }

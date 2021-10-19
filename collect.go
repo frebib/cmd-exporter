@@ -118,11 +118,11 @@ type CommandGatherer struct {
 
 func (c CommandGatherer) Gather() ([]*dto.MetricFamily, error) {
 	var executors []*cmdExecutor
-	var registry = prometheus.NewRegistry()
-	var gatherers = prometheus.Gatherers{registry}
+	registry := prometheus.NewRegistry()
+	gatherers := prometheus.Gatherers{registry}
 
 	var wg sync.WaitGroup
-	for i, _ := range c.config.Scripts {
+	for i := range c.config.Scripts {
 		wg.Add(1)
 
 		exec := cmdExecutor{

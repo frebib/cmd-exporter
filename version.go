@@ -1,5 +1,3 @@
 package main
 
-var (
-	Version = "unknown"
-)
+var Version = "unknown"
