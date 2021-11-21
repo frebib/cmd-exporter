@@ -1,5 +1,7 @@
 startup:
-  script: apt install -y python3 lsb-release
+  script: >-
+    apt install -y python3 lsb-release ||
+    apk add python3 lsb-release
 
 scripts:
 - name: date
@@ -10,6 +12,8 @@ scripts:
     print('# TYPE date gauge')
     print('date {}'.format(time.time()))
 
+#' bloody synatx highlighting
+
 - name: os-release
   script: |
     . /etc/os-release
@@ -17,17 +21,17 @@ scripts:
     echo "# TYPE os_release gauge"
     echo "os_release{id=\"$(lsb_release -is)\",description=\"$(lsb_release -ds | tr -d \")\",codename=\"$(lsb_release -cs)\",release=\"$(lsb_release -rs)\"} 1"
 
-#- name: node_disk_info
-#  script: |
-#    echo "# HELP node_disk_info Information and metadata about a disk"
-#    echo "# TYPE node_disk_info gauge"
-#    lsblk --nodeps --exclude=230 --output=NAME,PATH,HCTL,SERIAL,MODEL,TRAN --pairs | \
-#      sed -E \
-#          -e 's/[A-Z]+=/\L&/g' \
-#          -e 's/[a-z]+=""//g' \
-#          -e 's/\s+/ /g' \
-#          -e 's/\s+"/"/g' \
-#          -e 's/" (\w)/", \1/g' \
-#          -e 's/hctl=/scsi_id=/g' \
-#          -e 's/name=/device=/' \
-#          -e 's/^(.+)$/node_disk_info{\1} 1/'
+- name: node_disk_info
+  script: |
+    echo "# HELP node_disk_info Information and metadata about a disk"
+    echo "# TYPE node_disk_info gauge"
+    lsblk --nodeps --exclude=230 --output=NAME,PATH,HCTL,SERIAL,MODEL,TRAN --pairs | \
+      sed -E \
+          -e 's/[A-Z]+=/\L&/g' \
+          -e 's/[a-z]+=""//g' \
+          -e 's/\s+/ /g' \
+          -e 's/\s+"/"/g' \
+          -e 's/" (\w)/", \1/g' \
+          -e 's/hctl=/scsi_id=/g' \
+          -e 's/name=/device=/' \
+          -e 's/^(.+)$/node_disk_info{\1} 1/'

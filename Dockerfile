@@ -1,4 +1,4 @@
-ARG VERSION=0.0.1
+ARG VERSION=0.1.0
 
 FROM golang:alpine AS build
 

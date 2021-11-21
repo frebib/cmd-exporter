@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,13 +9,9 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-)
 
-type Result struct {
-	ExitCode int
-	Stdout   io.ReadSeeker
-	Stderr   io.ReadSeeker
-}
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 type Script struct {
 	Name    string
@@ -42,9 +37,6 @@ func (s *Script) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 
 	*s = Script(t)
-
-	// Timeout in seconds, not nanoseconds
-	s.Timeout = s.Timeout * time.Second
 
 	type scriptCmd struct {
 		Command interface{}
@@ -89,9 +81,8 @@ func (s *Script) Validate() error {
 	return nil
 }
 
-func (s *Script) Exec(ctx context.Context) (*Result, error) {
+func (s *Script) Run(ctx context.Context) (func() (int, error), io.ReadCloser, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
-	defer cancel()
 
 	argv := s.Command
 	if len(argv) < 1 {
@@ -99,49 +90,55 @@ func (s *Script) Exec(ctx context.Context) (*Result, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	stdout, err := cmd.StdoutPipe()
 
+	// Pipe script to stdin
 	if s.Script != "" {
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			log.Fatal(err)
+		stdin, inErr := cmd.StdinPipe()
+		if err != nil && inErr != nil {
+			err = prometheus.MultiError{err, inErr}
+		} else {
+			err = inErr
 		}
 
 		go func() {
-			defer stdin.Close()
 			io.WriteString(stdin, s.Script)
+			stdin.Close()
 		}()
 	}
 
-	result := &Result{
-		ExitCode: 0,
-		Stdout:   nil,
-		Stderr:   nil,
-	}
+	// Forcefully close stdout to make cmd.Wait() return
+	go func() {
+		<-ctx.Done()
+		stdout.Close()
+	}()
 
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
+	wait := func() (int, error) {
+		defer cancel()
 
-		if errors.Is(err, context.DeadlineExceeded) ||
-			errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			log.Printf("command '%s' timed out\n", s.Name)
-			result.ExitCode = -1
+		exitCode := 0
+		err := cmd.Wait()
+		if err != nil {
+			var exitErr *exec.ExitError
 
-		} else if errors.As(err, &exitErr) {
-			result.ExitCode = exitErr.ExitCode()
-			result.Stderr = bytes.NewReader(exitErr.Stderr)
+			exitCode = -1
+			if errors.Is(err, context.DeadlineExceeded) ||
+				errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				log.Printf("command '%s' timed out\n", s.Name)
+			} else if errors.As(err, &exitErr) {
+				err = nil
+				exitCode = exitErr.ExitCode()
 
-			log.Printf("command '%s' exited %d\n", s.Name, result.ExitCode)
-			if strings.TrimSpace(string(exitErr.Stderr)) != "" {
-				log.Printf("stderr:\n%s", string(exitErr.Stderr))
+				stderr := string(exitErr.Stderr)
+
+				log.Printf("command '%s' exited %d\n", s.Name, exitCode)
+				if strings.TrimSpace(stderr) != "" {
+					log.Printf("stderr:\n%s", stderr)
+				}
 			}
-
-		} else {
-			return nil, err
 		}
+		return exitCode, err
 	}
 
-	result.Stdout = bytes.NewReader(output)
-
-	return result, nil
+	return wait, stdout, cmd.Start()
 }

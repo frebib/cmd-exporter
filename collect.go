@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
-	"errors"
+	"log"
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
@@ -25,66 +26,94 @@ var (
 		"duration in seconds that the command execution took",
 		[]string{"command"}, nil,
 	)
+	commandMetricCount = prometheus.NewDesc(
+		prometheus.BuildFQName(Namespace, "metric", "count"),
+		"number of metrics returned by the command",
+		[]string{"command"}, nil,
+	)
 )
 
-type cmdExecutor struct {
-	script   *Script
-	result   Result
-	err      error
-	duration time.Duration
-}
+func (s *Script) Gather() ([]*dto.MetricFamily, error) {
+	var metrics []*dto.MetricFamily
+	var parsed map[string]*dto.MetricFamily
+	var duration time.Duration
+	var count int
 
-func (ce *cmdExecutor) Execute(ctx context.Context) error {
+	labels := &dto.LabelPair{
+		Name:  proto.String("command"),
+		Value: proto.String(s.Name),
+	}
+
+	exitCode := -1
 	start := time.Now()
-	res, err := ce.script.Exec(ctx)
-
-	ce.duration = time.Now().Sub(start)
-	ce.err = err
-	if res != nil {
-		ce.result = *res
-	}
-
-	return err
-}
-
-func (ce *cmdExecutor) Gather() ([]*dto.MetricFamily, error) {
-	if ce.err != nil {
-		return nil, ce.err
-	}
-	if ce.result.Stdout == nil {
-		return nil, errors.New("no output from command execution")
+	wait, stdout, err := s.Run(context.Background())
+	if err != nil {
+		log.Printf("failed to start command %s: %s", s.Name, err)
+		goto result
 	}
 
 	// Parse the command output into Metric Families ready to pass
 	// to the gatherer to be sorted and sent back to the client.
-	var parser expfmt.TextParser
-	mf, err := parser.TextToMetricFamilies(ce.result.Stdout)
+	parsed, err = new(expfmt.TextParser).TextToMetricFamilies(stdout)
 	if err != nil {
-		return nil, err
+		log.Printf("failed parse metrics from command %s: %s", s.Name, err)
+		duration = time.Now().Sub(start)
+		goto result
 	}
 
-	// convert map[string]MetricFamily -> []MetricFamily
-	ms := make([]*dto.MetricFamily, 0, len(mf))
-	for _, metric := range mf {
-		ms = append(ms, metric)
+	exitCode, err = wait()
+	duration = time.Now().Sub(start)
+
+	metrics = make([]*dto.MetricFamily, 0, len(parsed))
+	for _, mf := range parsed {
+		// Inject additional labels
+		for _, metric := range mf.Metric {
+			metric.Label = append(metric.Label, labels)
+		}
+		count += len(mf.Metric)
+		metrics = append(metrics, mf)
 	}
 
-	return ms, nil
+result:
+	r := prometheus.NewPedanticRegistry()
+	r.MustRegister(MetricCollector{
+		prometheus.MustNewConstMetric(
+			commandSuccess,
+			prometheus.GaugeValue,
+			ofBool(exitCode == 0 && err == nil), // 1 if exitcode was 0, otherwise 0
+			s.Name,
+		),
+		prometheus.MustNewConstMetric(
+			commandDuration,
+			prometheus.GaugeValue,
+			duration.Seconds(),
+			s.Name,
+		),
+		prometheus.MustNewConstMetric(
+			commandMetricCount,
+			prometheus.GaugeValue,
+			float64(count),
+			s.Name,
+		),
+	})
+	meta, err := r.Gather()
+	metrics = append(metrics, meta...)
+
+	return metrics, err
 }
 
-func (ce *cmdExecutor) Meta(ch chan<- prometheus.Metric) {
-	ch <- prometheus.MustNewConstMetric(
-		commandSuccess,
-		prometheus.GaugeValue,
-		ofBool(ce.result.ExitCode == 0 && ce.err == nil), // 1 if exitcode was 0, otherwise 0
-		ce.script.Name,
-	)
-	ch <- prometheus.MustNewConstMetric(
-		commandDuration,
-		prometheus.GaugeValue,
-		ce.duration.Seconds(),
-		ce.script.Name,
-	)
+type MetricCollector []prometheus.Metric
+
+func (mc MetricCollector) Describe(descs chan<- *prometheus.Desc) {
+	for _, metric := range mc {
+		descs <- metric.Desc()
+	}
+}
+
+func (mc MetricCollector) Collect(metrics chan<- prometheus.Metric) {
+	for _, metric := range mc {
+		metrics <- metric
+	}
 }
 
 func ofBool(b bool) float64 {
@@ -94,19 +123,13 @@ func ofBool(b bool) float64 {
 	return 0
 }
 
-type cmdCollector struct {
-	executors []*cmdExecutor
+type gatherResult struct {
+	metrics []*dto.MetricFamily
+	err     error
 }
 
-func (c cmdCollector) Describe(ch chan<- *prometheus.Desc) {
-	prometheus.DescribeByCollect(c, ch)
-}
-
-// Collect calls each executor and collects the meta metrics for each execution
-func (c cmdCollector) Collect(ch chan<- prometheus.Metric) {
-	for _, executor := range c.executors {
-		executor.Meta(ch)
-	}
+func (gr gatherResult) Gather() ([]*dto.MetricFamily, error) {
+	return gr.metrics, gr.err
 }
 
 // CommandGatherer executes the configured commands, parses the output as
@@ -118,32 +141,24 @@ type CommandGatherer struct {
 
 // Gather calls the Collect method of the registered Collectors
 func (c CommandGatherer) Gather() ([]*dto.MetricFamily, error) {
-	var executors []*cmdExecutor
 	var wg sync.WaitGroup
 
-	registry := prometheus.NewPedanticRegistry()
-	gatherers := prometheus.Gatherers{registry}
+	gatherers := make(prometheus.Gatherers, len(c.config.Scripts))
 
+	// Run all gatherers in goroutines and collect the results into a slice.
+	// This starts them all at once instead of in serial, which is all the
+	// prometheus.Gatherers implementation can muster.
+	wg.Add(len(c.config.Scripts))
 	for i := range c.config.Scripts {
-		wg.Add(1)
-
-		exec := cmdExecutor{
-			script: &c.config.Scripts[i],
-		}
-		executors = append(executors, &exec)
-		gatherers = append(gatherers, &exec)
-
-		go func(exec *cmdExecutor) {
-			defer wg.Done()
-			exec.Execute(context.Background())
-		}(&exec)
+		go func(i int) {
+			metrics, err := c.config.Scripts[i].Gather()
+			gatherers[i] = gatherResult{metrics, err}
+			wg.Done()
+		}(i)
 	}
-
-	// All executors collect the meta metrics via this registry
-	registry.MustRegister(&cmdCollector{executors: executors})
-
-	// Wait for all command executions to terminate before gathering the results
 	wg.Wait()
 
+	// Collate the multiple gatherers output in one go after they've all
+	// been executed
 	return gatherers.Gather()
 }
