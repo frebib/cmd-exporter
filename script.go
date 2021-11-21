@@ -85,8 +85,6 @@ func (s *Script) Validate() error {
 		if s.Script == "" {
 			return errors.New("no script or command provided")
 		}
-
-		s.Command = []string{"/bin/sh", "-e"}
 	}
 	return nil
 }
@@ -95,7 +93,12 @@ func (s *Script) Exec(ctx context.Context) (*Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, s.Command[0], s.Command[1:]...)
+	argv := s.Command
+	if len(argv) < 1 {
+		argv = []string{"/bin/sh", "-e"}
+	}
+
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 
 	if s.Script != "" {
 		stdin, err := cmd.StdinPipe()

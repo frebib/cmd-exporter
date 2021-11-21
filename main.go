@@ -67,7 +67,11 @@ func main() {
 			log.Fatalf("startup command failed to validate: %s", err)
 		}
 
-		cmd := exec.Command(startup.Command[0], startup.Command[1:]...)
+		argv := startup.Command
+		if len(argv) < 1 {
+			argv = []string{"/bin/sh", "-e"}
+		}
+		cmd := exec.Command(argv[0], argv[1:]...)
 
 		out, err := cmd.StdoutPipe()
 		if err != nil {
