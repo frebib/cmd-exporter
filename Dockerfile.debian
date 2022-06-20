@@ -14,7 +14,7 @@ RUN go build -v -ldflags "-w -s -X main.Version=$VERSION"
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 ARG VERSION
 
