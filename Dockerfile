@@ -18,12 +18,11 @@ FROM spritsail/alpine:3.16
 
 ARG VERSION
 
-LABEL maintainer="frebib <cmd-exporter@frebib.net>" \
-      org.label-schema.vendor="frebib" \
-      org.label-schema.name="Prometheus command exporter" \
-      org.label-schema.url="https://github.com/frebib/cmd-exporter" \
-      org.label-schema.description="Prometheus exporter for arbitrary commands and scripts" \
-      org.label-schema.version=${VERSION}
+LABEL org.opencontainers.image.authors="frebib <cmd-exporter@frebib.net>" \
+      org.opencontainers.image.title="Prometheus command exporter" \
+      org.opencontainers.image.url="https://github.com/frebib/cmd-exporter" \
+      org.opencontainers.image.description="Prometheus exporter for arbitrary commands and scripts" \
+      org.opencontainers.image.version=${VERSION}
 
 COPY --from=build /tmp/build/cmd-exporter /usr/bin/
 
