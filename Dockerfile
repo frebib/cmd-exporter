@@ -27,4 +27,4 @@ LABEL org.opencontainers.image.authors="frebib <cmd-exporter@frebib.net>" \
 COPY --from=build /tmp/build/cmd-exporter /usr/bin/
 
 EXPOSE 9654
-CMD ["/usr/bin/cmd-exporter"]
+ENTRYPOINT ["/usr/bin/cmd-exporter"]
