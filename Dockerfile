@@ -10,7 +10,7 @@ RUN go mod download -x
 
 ARG CGO_ENABLED=0
 COPY *.go ./
-RUN go build -v -ldflags "-w -s -X main.Version=$VERSION"
+RUN go build -v -trimpath -ldflags "-w -s -X main.Version=$VERSION"
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
