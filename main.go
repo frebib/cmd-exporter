@@ -136,8 +136,15 @@ func main() {
 		Addr:    opts.ListenAddr,
 		Handler: router,
 	}
-
+	flagConfig := &web.FlagConfig{
+		WebListenAddresses: &[]string{opts.ListenAddr},
+		WebConfigFile:      &opts.WebConfigFile,
+	}
 	logger := kitlog.NewLogfmtLogger(log.Writer())
+
 	log.Printf("Listening on %s at %s\n", opts.ListenAddr, opts.MetricsPath)
-	log.Fatalln(web.ListenAndServe(server, opts.WebConfigFile, logger))
+	err = web.ListenAndServe(server, flagConfig, logger)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatal(err)
+	}
 }
