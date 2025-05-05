@@ -1,6 +1,7 @@
 repo = "frebib/cmd-exporter"
 archs = ["amd64", "arm64"]
 branches = ["master"]
+events = ["push"]
 docker_matrix = {
   "alpine": {
     "dockerfile": "Dockerfile",
@@ -29,12 +30,12 @@ def main(ctx):
     for arch in archs:
       pipelines.append(docker(key, arch, vals["dockerfile"]))
 
-    if ctx.build.branch in branches:
+    if ctx.build.branch in branches and ctx.build.event in events:
       deps = ["docker-%s-%s" % (key, a) for a in archs]
-      pipelines.append(publish(key, deps, vals["tags"]))
+      pipelines.extend(publish(key, deps, vals["tags"]))
 
-  if ctx.build.branch in branches:
-    deps = ["publish-%s" % key for key in docker_matrix.keys()]
+  if ctx.build.branch in branches and ctx.build.event in events:
+    deps = ["publish-%s-dockerhub" % key for key in docker_matrix.keys()]
     pipelines.append(readme(deps))
 
   return pipelines
@@ -82,7 +83,7 @@ def docker(key, arch, dockerfile):
       {
         "name": "docker build",
         "pull": "always",
-        "image": "spritsail/docker-build",
+        "image": "registry.spritsail.io/spritsail/docker-build",
         "settings": {
           "dockerfile": dockerfile,
         },
@@ -90,49 +91,57 @@ def docker(key, arch, dockerfile):
       {
         "name": "docker publish",
         "pull": "always",
-        "image": "spritsail/docker-publish",
+        "image": "registry.spritsail.io/spritsail/docker-publish",
         "settings": {
           "registry": {"from_secret": "registry_url"},
           "login": {"from_secret": "registry_login"},
         },
         "when": {
           "branch": branches,
-          "event": ["push"],
+          "event": events,
         },
       },
     ],
   }
 
 def publish(key, deps, tags=[]):
-  return {
-    "kind": "pipeline",
-    "name": "publish-%s" % key,
-    "depends_on": deps,
-    "platform": {
-      "os": "linux",
-    },
-    "environment": {
-      "DOCKER_IMAGE_TOKEN": key,
-    },
-    "steps": [
-      {
-        "name": "publish",
-        "image": "spritsail/docker-multiarch-publish",
-        "pull": "always",
-        "settings": {
-          "src_registry": {"from_secret": "registry_url"},
-          "src_login": {"from_secret": "registry_login"},
-          "dest_repo": repo,
-          "dest_login": {"from_secret": "docker_login"},
-          "tags": tags,
-        },
-        "when": {
-          "branch": branches,
-          "event": ["push"],
-        },
+  return [
+    {
+      "kind": "pipeline",
+      "name": "publish-%s-%s" % (key, name),
+      "depends_on": deps,
+      "platform": {
+        "os": "linux",
       },
+      "environment": {
+        "DOCKER_IMAGE_TOKEN": key,
+      },
+      "steps": [
+        {
+          "name": "publish",
+          "image": "registry.spritsail.io/spritsail/docker-multiarch-publish",
+          "pull": "always",
+          "settings": {
+            "src_registry": {"from_secret": "registry_url"},
+            "src_login": {"from_secret": "registry_login"},
+            "dest_registry": registry,
+            "dest_repo": repo,
+            "dest_login": {"from_secret": login_secret},
+            "tags": tags,
+          },
+          "when": {
+            "branch": branches,
+            "event": events,
+          },
+        },
+      ],
+    }
+    for name, registry, login_secret in [
+      ("dockerhub", "index.docker.io", "docker_login"),
+      ("spritsail", "registry.spritsail.io", "spritsail_login"),
+      ("ghcr", "ghcr.io", "ghcr_login"),
     ]
-  }
+  ]
 
 def readme(deps):
   return {
@@ -151,10 +160,8 @@ def readme(deps):
         },
         "when": {
           "branch": branches,
-          "event": ["push"]
+          "event": events
         }
       }
     ]
   }
-
-# vim: ft=python sw=2
